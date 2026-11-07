@@ -1,0 +1,1 @@
+numpy pandas matplotlib rasterio geopandas torch jupyter 
