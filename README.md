@@ -1,36 +1,38 @@
 # Spatiotemporal Change Detection - Tehran Urban Growth
 
-## Overview
-This project focuses on detecting and analyzing spatiotemporal changes in Tehran's urban growth over time. By utilizing satellite imagery and geospatial data, the project aims to map the expansion of urban areas, identify land-use/land-cover (LULC) transitions, and visualize the spatial patterns of Tehran's development.
+چ# Tehran Urban Change Detection
+## Project Overview
+This project investigates spatial and temporal urban change in Tehran and its surrounding area using Sentinel-2 Level-2A satellite imagery and GeoAI methods.
 
-## Objectives
-- To analyze the urban expansion of Tehran across different time periods.
-- To classify land cover changes, including built-up areas, vegetation, barren land, and water bodies.
-- To generate change detection maps to visualize the spatiotemporal dynamics of urban growth.
-- To provide insights into the environmental and infrastructural impacts of rapid urbanization.
+The workflow includes data preparation, spectral-index analysis, machine-learning and deep-learning change detection, and evaluation.
 
-## Technologies and Tools Used
-- **Programming Language:** Python
-- **GIS and Remote Sensing:** Google Earth Engine (GEE), Geopandas, Rasterio, GDAL
-- **Data Analysis and Visualization:** Pandas, NumPy, Matplotlib, Folium
-- **Machine Learning:** Scikit-learn, TensorFlow
+## Study Area and Imagery
+- Area of interest (AOI): Pending team confirmation.
+- Selected image dates: Pending final image selection and quality assessment.
+- Primary imagery: Sentinel-2 Level-2A.
+- Planned bands: B2, B3, B4, B8, B11, and B12.
 
-## Data Sources
-- Landsat Satellite Imagery (Landsat 5, 8)
-- Sentinel-2 Imagery
-- OpenStreetMap (OSM) Data
+## Repository Structure
+- `configs/`: Project and model configurations.
+- `data/`: Input, reference, and processed datasets.
+- `docs/`: Documentation and methodology.
+- `notebooks/`: Exploratory analysis.
+- `paper/`: Manuscript materials.
+- `results/`: Maps, figures, metrics, and models.
+- `scripts/`: Executable workflow scripts.
+- `src/`: Reusable Python source code.
+- `tests/`: Automated tests.
 
-## Methodology
-1. **Data Acquisition:** Collecting multi-temporal satellite imagery for the Tehran study area.
-2. **Preprocessing:** Cloud masking, atmospheric correction, and image co-registration.
-3. **Classification:** Applying image classification algorithms to categorize land cover types.
-4. **Change Detection:** Utilizing post-classification comparison and image differencing techniques to identify changes.
-5. **Analysis and Visualization:** Generating maps and statistical reports to analyze urban growth trends.
+## Data Management
+Original source data must remain unchanged. Record data sources, product identifiers, acquisition dates, AOI, CRS, resolution, usage terms, and processing history.
 
-## Project Structure
-- `/data`: Raw and processed datasets.
-- `/notebooks`: Jupyter notebooks for data exploration and modeling.
-- `/src`: Source code for processing and analysis.
-- `/results`: Output maps, charts, and final reports.
+Large datasets should not be committed to Git unless the team agrees on a suitable storage method.
 
+Never commit passwords, access tokens, or private credentials.
+
+## Reproducibility
+Document software versions, parameters, and processing steps. Keep scripts and configurations organized so that project outputs can be reproduced.
+
+## Project Status
+The AOI, selected image pair, and final processing settings are subject to team confirmation.
 
