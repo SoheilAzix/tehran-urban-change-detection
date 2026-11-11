@@ -33,7 +33,4 @@ This project focuses on detecting and analyzing spatiotemporal changes in Tehran
 - `/src`: Source code for processing and analysis.
 - `/results`: Output maps, charts, and final reports.
 
-## How to Run
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/[YOUR-USERNAME]/[YOUR-REPO-NAME].git
+
