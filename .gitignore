@@ -1,1 +1,38 @@
-__pycache__/ 
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments (محیط‌های مجازی)
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Jupyter Notebook Checkpoints (فایل‌های موقت ژوپیتر)
+.ipynb_checkpoints/
+
+# Datasets and Heavy Images (دیتاست‌ها و تصاویر سنگین)
+*.tif
+*.tiff
+*.csv
+*.shp
+*.shx
+*.dbf
+*.h5
+*.pkl
+data/
+
+# Outputs and Results (خروجی‌های موقت)
+results/
+outputs/
+*.log
+
+# OS generated files (فایل‌های سیستم‌عامل)
+.DS_Store
+Thumbs.db
+
+# IDE files (فایل‌های ادیتورها)
+.vscode/
+.idea/
