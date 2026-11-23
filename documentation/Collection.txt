@@ -1,0 +1,4 @@
+javascript
+var S2 = ee.ImageCollection(
+  'COPERNICUS/S2_SR_HARMONIZED'
+);

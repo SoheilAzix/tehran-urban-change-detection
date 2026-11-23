@@ -1,0 +1,1139 @@
+/************************************************************
+ TEHRAN DISTRICT 22
+ SENTINEL-2 L2A - FINAL JULY EXPORT
+
+ Years: 2017, 2026
+ Month: July
+
+ IMAGE EXPORTS:
+ 1. 2017 - 10m - B2, B3, B4, B8
+ 2. 2026 - 10m - B2, B3, B4, B8
+ 3. 2017 - 20m - B11, B8, B4, B3, B2, B12, SCL
+ 4. 2026 - 20m - B11, B8, B4, B3, B2, B12, SCL
+
+ ALL EXPORTS:
+ Buffer: 40 meters
+ CRS: EPSG:32639
+
+ IMAGE SELECTION:
+ Minimum ROI coverage: 99%
+ Best acquisition: Highest ROI_CLEAR_PCT
+
+ METADATA:
+ One CSV for both years
+ One row per source granule
+************************************************************/
+
+
+// ==========================================================
+// 1. STUDY AREA
+// ==========================================================
+
+var roi = ee.FeatureCollection(
+  'projects/amir-gee/assets/Export_Output222'
+);
+
+var roiGeometry = roi.geometry();
+
+Map.centerObject(roi, 12);
+
+Map.addLayer(
+  roi,
+  {color: 'red'},
+  'Tehran District 22'
+);
+
+
+// ==========================================================
+// 2. SETTINGS
+// ==========================================================
+
+var YEARS = [2017, 2026];
+
+var JULY = 7;
+
+var CRS = 'EPSG:32639';
+
+var SCALE_10M = 10;
+
+var SCALE_20M = 20;
+
+var DRIVE_FOLDER = 'Tehran22_Sentinel2';
+
+var MIN_COVERAGE = 99;
+
+var BUFFER_DISTANCE = 40;
+
+
+// Buffered geometry used for ALL exports
+
+var exportGeometry = roiGeometry.buffer(
+  BUFFER_DISTANCE
+);
+
+Map.addLayer(
+  exportGeometry,
+  {color: 'yellow'},
+  'ROI Buffer 40m',
+  false
+);
+
+
+// Export bands
+
+var BANDS_10M = [
+  'B2',
+  'B3',
+  'B4',
+  'B8'
+];
+
+var BANDS_20M = [
+  'B11',
+  'B8',
+  'B4',
+  'B3',
+  'B2',
+  'B12',
+  'SCL'
+];
+
+
+// ==========================================================
+// 3. SENTINEL-2 COLLECTION
+// ==========================================================
+
+var S2 = ee.ImageCollection(
+  'COPERNICUS/S2_SR_HARMONIZED'
+);
+
+
+// ==========================================================
+// 4. TOTAL ROI PIXEL COUNT
+// Used for the original ROI coverage calculation
+// ==========================================================
+
+var totalPixelCount = ee.Number(
+
+  ee.Image.constant(1)
+    .rename('total')
+
+    .reduceRegion({
+
+      reducer: ee.Reducer.sum(),
+
+      geometry: roiGeometry,
+
+      scale: SCALE_20M,
+
+      crs: CRS,
+
+      maxPixels: 1e10,
+
+      tileScale: 4
+
+    })
+
+    .get('total')
+
+);
+
+print('Total ROI pixels:', totalPixelCount);
+
+
+// ==========================================================
+// 5. CALCULATE IMAGE QUALITY
+// Original selection criteria preserved
+// ==========================================================
+
+function addImageQuality(img) {
+
+  img = ee.Image(img);
+
+  var scl = img.select('SCL');
+
+
+  // Classified pixels: SCL 1 to 11
+
+  var validMask = scl.gte(1)
+    .and(scl.lte(11));
+
+
+  // Clear pixels: vegetation, bare soil, water
+
+  var clearMask = scl.eq(4)
+    .or(scl.eq(5))
+    .or(scl.eq(6));
+
+
+  var statsImage = ee.Image.cat([
+
+    ee.Image.constant(1)
+      .rename('valid')
+      .updateMask(validMask),
+
+    ee.Image.constant(1)
+      .rename('clear')
+      .updateMask(clearMask)
+
+  ]);
+
+
+  var stats = statsImage.reduceRegion({
+
+    reducer: ee.Reducer.sum(),
+
+    geometry: roiGeometry,
+
+    scale: SCALE_20M,
+
+    crs: CRS,
+
+    maxPixels: 1e10,
+
+    tileScale: 4
+
+  });
+
+
+  var validCount = ee.Number(
+    stats.get('valid')
+  );
+
+  var clearCount = ee.Number(
+    stats.get('clear')
+  );
+
+
+  var coveragePercentage = validCount
+    .divide(totalPixelCount)
+    .multiply(100);
+
+
+  var clearPercentage = clearCount
+    .divide(totalPixelCount)
+    .multiply(100);
+
+
+  return img.set({
+
+    'ROI_COVERAGE_PCT': coveragePercentage,
+
+    'ROI_CLEAR_PCT': clearPercentage
+
+  });
+
+}
+
+
+// ==========================================================
+// 6. MOSAIC GRANULES OF THE SAME ACQUISITION
+// Restore native projections after mosaic()
+// ==========================================================
+
+function createAcquisitionMosaics(collection) {
+
+  var identifiers = ee.List(
+
+    collection.aggregate_array(
+      'DATATAKE_IDENTIFIER'
+    )
+
+  ).distinct();
+
+
+  var mosaics = ee.ImageCollection.fromImages(
+
+    identifiers.map(function(identifier) {
+
+      var group = collection.filter(
+
+        ee.Filter.eq(
+          'DATATAKE_IDENTIFIER',
+          identifier
+        )
+
+      );
+
+
+      var first = ee.Image(
+        group.first()
+      );
+
+      var mosaic = ee.Image(
+        group.mosaic()
+      );
+
+
+      // Native projections
+
+      var projection10m = first
+        .select('B2')
+        .projection();
+
+      var projection20m = first
+        .select('B11')
+        .projection();
+
+
+      // Restore 10m bands
+
+      var bands10m = mosaic
+
+        .select([
+          'B8',
+          'B4',
+          'B3',
+          'B2'
+        ])
+
+        .setDefaultProjection(
+          projection10m
+        );
+
+
+      // Restore 20m bands
+
+      var bands20m = mosaic
+
+        .select([
+          'B11',
+          'B12'
+        ])
+
+        .setDefaultProjection(
+          projection20m
+        );
+
+
+      // Restore SCL projection
+
+      var sclBand = mosaic
+
+        .select('SCL')
+
+        .setDefaultProjection(
+          projection20m
+        );
+
+
+      // Combine all bands
+
+      var fixedMosaic = bands10m
+
+        .addBands(bands20m)
+
+        .addBands(sclBand);
+
+
+      return ee.Image(fixedMosaic)
+
+        .copyProperties(first, [
+
+          'system:time_start',
+
+          'DATATAKE_IDENTIFIER',
+
+          'CLOUDY_PIXEL_PERCENTAGE'
+
+        ])
+
+        .set(
+          'DATATAKE_IDENTIFIER',
+          identifier
+        );
+
+    })
+
+  );
+
+
+  return mosaics;
+
+}
+
+
+// ==========================================================
+// 7. SELECT THE BEST JULY ACQUISITION
+// Selection is performed on the ORIGINAL ROI
+// ==========================================================
+
+function getBestJulyImage(year) {
+
+  var startDate = ee.Date.fromYMD(
+    year,
+    JULY,
+    1
+  );
+
+  var endDate = startDate.advance(
+    1,
+    'month'
+  );
+
+
+  var collection = S2
+
+    .filterBounds(roiGeometry)
+
+    .filterDate(
+      startDate,
+      endDate
+    )
+
+    .filter(
+      ee.Filter.notNull([
+        'DATATAKE_IDENTIFIER'
+      ])
+    );
+
+
+  print(
+    'Year ' + year + ' - Original granules:',
+    collection.size()
+  );
+
+
+  var mosaics = createAcquisitionMosaics(
+    collection
+  );
+
+
+  var ranked = mosaics
+
+    .map(addImageQuality)
+
+    .filter(
+      ee.Filter.gte(
+        'ROI_COVERAGE_PCT',
+        MIN_COVERAGE
+      )
+    )
+
+    .sort(
+      'ROI_CLEAR_PCT',
+      false
+    );
+
+
+  return {
+
+    collection: collection,
+
+    ranked: ranked
+
+  };
+
+}
+
+
+// ==========================================================
+// 8. CREATE 10m IMAGE
+// B2, B3, B4, B8
+// Reflectance scaled to 0-1
+// ==========================================================
+
+function make10mImage(sourceGranules) {
+
+  var first = ee.Image(
+    sourceGranules.first()
+  );
+
+
+  var projection10m = first
+    .select('B2')
+    .projection();
+
+
+  var image10m = sourceGranules
+
+    .select(BANDS_10M)
+
+    .mosaic()
+
+    .setDefaultProjection(
+      projection10m
+    )
+
+    .divide(10000)
+
+    .toFloat()
+
+    .select(BANDS_10M)
+
+    .clip(exportGeometry);
+
+
+  return image10m;
+
+}
+
+
+// ==========================================================
+// 9. CREATE 20m IMAGE
+// B11, B8, B4, B3, B2, B12, SCL
+//
+// 10m bands aggregated to 20m using mean
+// 20m bands retain native resolution
+// SCL remains categorical but cast to Float32 for export
+// Clear mask: SCL 4, 5, 6
+// ==========================================================
+
+function make20mImage(sourceGranules) {
+
+  var first = ee.Image(
+    sourceGranules.first()
+  );
+
+
+  var projection10m = first
+    .select('B2')
+    .projection();
+
+  var projection20m = first
+    .select('B11')
+    .projection();
+
+
+  // --------------------------------------------------------
+  // Native 10m bands
+  // --------------------------------------------------------
+
+  var image10m = sourceGranules
+
+    .select([
+      'B8',
+      'B4',
+      'B3',
+      'B2'
+    ])
+
+    .mosaic()
+
+    .setDefaultProjection(
+      projection10m
+    );
+
+
+  // --------------------------------------------------------
+  // Native SCL band
+  // --------------------------------------------------------
+
+  var scl = sourceGranules
+
+    .select('SCL')
+
+    .mosaic()
+
+    .setDefaultProjection(
+      projection20m
+    );
+
+
+  // Clear pixel mask
+
+  var clearMask = scl.eq(4)
+    .or(scl.eq(5))
+    .or(scl.eq(6));
+
+
+  // --------------------------------------------------------
+  // Aggregate 10m bands to 20m
+  // --------------------------------------------------------
+
+  var bands10mTo20m = image10m
+
+    .updateMask(clearMask)
+
+    .divide(10000)
+
+    .reduceResolution({
+
+      reducer: ee.Reducer.mean(),
+
+      maxPixels: 16
+
+    })
+
+    .reproject({
+
+      crs: CRS,
+
+      scale: SCALE_20M
+
+    });
+
+
+  // --------------------------------------------------------
+  // Native 20m spectral bands
+  // --------------------------------------------------------
+
+  var bands20m = sourceGranules
+
+    .select([
+      'B11',
+      'B12'
+    ])
+
+    .mosaic()
+
+    .setDefaultProjection(
+      projection20m
+    )
+
+    .updateMask(clearMask)
+
+    .divide(10000)
+
+    .reproject({
+
+      crs: CRS,
+
+      scale: SCALE_20M
+
+    });
+
+
+  // --------------------------------------------------------
+  // SCL categorical band
+  // Cast to Float32 so all exported bands share
+  // the same data type (fixes inconsistent types error)
+  // --------------------------------------------------------
+
+  var sclOutput = scl
+
+    .reproject({
+
+      crs: CRS,
+
+      scale: SCALE_20M
+
+    })
+
+    .updateMask(clearMask)
+
+    .toFloat();
+
+
+  // --------------------------------------------------------
+  // Combine bands in requested order
+  // --------------------------------------------------------
+
+  var finalImage = bands20m
+
+    .select('B11')
+
+    .addBands(
+      bands10mTo20m.select([
+        'B8',
+        'B4',
+        'B3',
+        'B2'
+      ])
+    )
+
+    .addBands(
+      bands20m.select('B12')
+    )
+
+    .addBands(sclOutput)
+
+    .select(BANDS_20M)
+
+    .clip(exportGeometry);
+
+
+  // Safety cast: ensure every band is Float32
+
+  return finalImage.toFloat();
+
+}
+
+
+// ==========================================================
+// 10. EXPORT FOUR IMAGES
+// Two years x two spatial resolutions
+// ==========================================================
+
+var metadataCollections = [];
+
+
+YEARS.forEach(function(year) {
+
+  print('========================================');
+
+  print('PROCESSING YEAR:', year);
+
+  var result = getBestJulyImage(year);
+
+  var ranked = result.ranked;
+
+
+  // Check whether a qualifying image exists
+
+  ranked.size().evaluate(function(count) {
+
+    if (count === 0) {
+
+      print(
+        'NO QUALIFYING JULY IMAGE FOR YEAR:',
+        year
+      );
+
+      return;
+
+    }
+
+
+    // ------------------------------------------------------
+    // Select the best acquisition
+    // ------------------------------------------------------
+
+    var bestImage = ee.Image(
+      ranked.first()
+    );
+
+
+    var acquisitionId = bestImage.get(
+      'DATATAKE_IDENTIFIER'
+    );
+
+
+    var acquisitionDate = ee.Date(
+      bestImage.get('system:time_start')
+    );
+
+
+    print('SELECTED YEAR:', year);
+
+    print(
+      'DATATAKE_IDENTIFIER:',
+      acquisitionId
+    );
+
+    print(
+      'ACQUISITION DATE UTC:',
+      acquisitionDate.format(
+        'YYYY-MM-dd HH:mm:ss'
+      )
+    );
+
+    print(
+      'ROI COVERAGE (%):',
+      bestImage.get('ROI_COVERAGE_PCT')
+    );
+
+    print(
+      'ROI CLEAR PERCENTAGE (%):',
+      bestImage.get('ROI_CLEAR_PCT')
+    );
+
+
+    // ------------------------------------------------------
+    // Retrieve ALL granules from the selected acquisition
+    // that intersect the buffered geometry.
+    // ------------------------------------------------------
+
+    var sourceGranules = S2
+
+      .filterBounds(exportGeometry)
+
+      .filterDate(
+
+        ee.Date.fromYMD(
+          year,
+          JULY,
+          1
+        ),
+
+        ee.Date.fromYMD(
+          year,
+          JULY,
+          1
+        ).advance(1, 'month')
+
+      )
+
+      .filter(
+
+        ee.Filter.eq(
+          'DATATAKE_IDENTIFIER',
+          acquisitionId
+        )
+
+      );
+
+
+    print(
+      'BUFFERED SOURCE GRANULE COUNT:',
+      sourceGranules.size()
+    );
+
+    print(
+      'SOURCE SYSTEM INDEX:',
+      sourceGranules.aggregate_array(
+        'system:index'
+      )
+    );
+
+    print(
+      'SOURCE PRODUCT ID:',
+      sourceGranules.aggregate_array(
+        'PRODUCT_ID'
+      )
+    );
+
+
+    // ------------------------------------------------------
+    // 10A. 10m export
+    // ------------------------------------------------------
+
+    var image10m = make10mImage(
+      sourceGranules
+    );
+
+
+    var name10m =
+      'Tehran22_S2_' +
+      year +
+      '_July_10m_B2_B3_B4_B8';
+
+
+    Export.image.toDrive({
+
+      image: image10m,
+
+      description: name10m,
+
+      folder: DRIVE_FOLDER,
+
+      fileNamePrefix: name10m,
+
+      region: exportGeometry.bounds(1),
+
+      scale: SCALE_10M,
+
+      crs: CRS,
+
+      maxPixels: 1e13,
+
+      fileFormat: 'GeoTIFF',
+
+      formatOptions: {
+        cloudOptimized: true
+      }
+
+    });
+
+
+    print(
+      '10m EXPORT TASK CREATED:',
+      name10m
+    );
+
+
+    // ------------------------------------------------------
+    // 10B. 20m export
+    // ------------------------------------------------------
+
+    var image20m = make20mImage(
+      sourceGranules
+    );
+
+
+    var name20m =
+      'Tehran22_S2_' +
+      year +
+      '_July_20m_AllBands';
+
+
+    Export.image.toDrive({
+
+      image: image20m,
+
+      description: name20m,
+
+      folder: DRIVE_FOLDER,
+
+      fileNamePrefix: name20m,
+
+      region: exportGeometry.bounds(1),
+
+      scale: SCALE_20M,
+
+      crs: CRS,
+
+      maxPixels: 1e13,
+
+      fileFormat: 'GeoTIFF',
+
+      formatOptions: {
+        cloudOptimized: true
+      }
+
+    });
+
+
+    print(
+      '20m EXPORT TASK CREATED:',
+      name20m
+    );
+
+
+    // ------------------------------------------------------
+    // 10C. Metadata for selected acquisition
+    // ------------------------------------------------------
+
+    var metadata = sourceGranules.map(
+      function(image) {
+
+        image = ee.Image(image);
+
+        return ee.Feature(null, {
+
+          'YEAR': year,
+
+          'MONTH': 'July',
+
+          'COLLECTION':
+            'COPERNICUS/S2_SR_HARMONIZED',
+
+          'DATATAKE_IDENTIFIER':
+            image.get('DATATAKE_IDENTIFIER'),
+
+          'SYSTEM_INDEX':
+            image.get('system:index'),
+
+          'PRODUCT_ID':
+            image.get('PRODUCT_ID'),
+
+          'GRANULE_ACQUISITION_DATE_UTC':
+            ee.Date(
+              image.get('system:time_start')
+            ).format('YYYY-MM-dd HH:mm:ss'),
+
+          'SELECTED_ACQUISITION_DATE_UTC':
+            acquisitionDate.format(
+              'YYYY-MM-dd HH:mm:ss'
+            ),
+
+          'ROI_COVERAGE_PERCENT':
+            bestImage.get('ROI_COVERAGE_PCT'),
+
+          'ROI_CLEAR_PERCENT':
+            bestImage.get('ROI_CLEAR_PCT'),
+
+          'BUFFER_METERS': 40,
+
+          'CRS': CRS,
+
+          'EXPORT_10M_BANDS':
+            'B2, B3, B4, B8',
+
+          'EXPORT_10M_SCALE':
+            10,
+
+          'EXPORT_20M_BANDS':
+            'B11, B8, B4, B3, B2, B12, SCL',
+
+          'EXPORT_20M_SCALE':
+            20,
+
+          'EXPORT_10M_FILENAME':
+            name10m,
+
+          'EXPORT_20M_FILENAME':
+            name20m
+
+        });
+
+      }
+    );
+
+
+    metadataCollections.push(metadata);
+
+
+    print(
+      'METADATA RECORDS FOR YEAR:',
+      year,
+      metadata.size()
+    );
+
+    print('YEAR COMPLETED:', year);
+
+    print('========================================');
+
+  });
+
+});
+
+
+// ==========================================================
+// 11. EXPORT METADATA CSV
+// One combined metadata table for both years
+// ==========================================================
+
+function getYearMetadata(year) {
+
+  var result = getBestJulyImage(year);
+
+  var ranked = result.ranked;
+
+  var hasImage = ranked.size().gt(0);
+
+
+  var fallback = ee.Image.constant(0)
+    .rename('dummy')
+    .set('DATATAKE_IDENTIFIER', 'NO_IMAGE');
+
+
+  var bestImage = ee.Image(
+    ee.Algorithms.If(
+      hasImage,
+      ranked.first(),
+      fallback
+    )
+  );
+
+
+  var acquisitionId = bestImage.get(
+    'DATATAKE_IDENTIFIER'
+  );
+
+
+  var sourceGranules = S2
+
+    .filterBounds(exportGeometry)
+
+    .filterDate(
+
+      ee.Date.fromYMD(year, JULY, 1),
+
+      ee.Date.fromYMD(year, JULY, 1)
+        .advance(1, 'month')
+
+    )
+
+    .filter(
+      ee.Filter.eq(
+        'DATATAKE_IDENTIFIER',
+        acquisitionId
+      )
+    );
+
+
+  var rows = sourceGranules.map(
+    function(image) {
+
+      image = ee.Image(image);
+
+      return ee.Feature(null, {
+
+        'YEAR': year,
+
+        'MONTH': 'July',
+
+        'COLLECTION':
+          'COPERNICUS/S2_SR_HARMONIZED',
+
+        'DATATAKE_IDENTIFIER':
+          image.get('DATATAKE_IDENTIFIER'),
+
+        'SYSTEM_INDEX':
+          image.get('system:index'),
+
+        'PRODUCT_ID':
+          image.get('PRODUCT_ID'),
+
+        'GRANULE_ACQUISITION_DATE_UTC':
+          ee.Date(
+            image.get('system:time_start')
+          ).format('YYYY-MM-dd HH:mm:ss'),
+
+        'SELECTED_ACQUISITION_DATE_UTC':
+          ee.Date(
+            bestImage.get('system:time_start')
+          ).format('YYYY-MM-dd HH:mm:ss'),
+
+        'ROI_COVERAGE_PERCENT':
+          bestImage.get('ROI_COVERAGE_PCT'),
+
+        'ROI_CLEAR_PERCENT':
+          bestImage.get('ROI_CLEAR_PCT'),
+
+        'BUFFER_METERS': 40,
+
+        'CRS': CRS,
+
+        'EXPORT_10M_BANDS':
+          'B2, B3, B4, B8',
+
+        'EXPORT_10M_SCALE': 10,
+
+        'EXPORT_20M_BANDS':
+          'B11, B8, B4, B3, B2, B12, SCL',
+
+        'EXPORT_20M_SCALE': 20
+
+      });
+
+    }
+  );
+
+
+  return ee.FeatureCollection(
+    ee.Algorithms.If(
+      hasImage,
+      rows,
+      ee.FeatureCollection([])
+    )
+  );
+
+}
+
+
+var metadata2017 = getYearMetadata(2017);
+
+var metadata2026 = getYearMetadata(2026);
+
+
+var finalMetadata = metadata2017.merge(
+  metadata2026
+);
+
+
+print(
+  'FINAL METADATA TABLE:',
+  finalMetadata
+);
+
+print(
+  'TOTAL METADATA ROWS:',
+  finalMetadata.size()
+);
+
+
+Export.table.toDrive({
+
+  collection: finalMetadata,
+
+  description:
+    'Tehran22_July_2017_2026_Metadata',
+
+  folder: DRIVE_FOLDER,
+
+  fileNamePrefix:
+    'Tehran22_July_2017_2026_Metadata',
+
+  fileFormat: 'CSV'
+
+});
+
+
+print('METADATA CSV EXPORT TASK CREATED');
+
+print('ALL EXPORT TASKS HAVE BEEN DEFINED');
+
+
+/********************* END ************************/
