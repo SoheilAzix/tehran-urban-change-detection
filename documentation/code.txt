@@ -1,0 +1,304 @@
+
+/************************************************************
+ PROJECT:
+ Spatio-Temporal Change Detection and Urban Development
+ Study Area: Tehran Municipality - District 22
+
+ SATELLITE:
+ Sentinel-2 Level-2A Harmonized
+
+ YEARS: 2017 and 2026
+ MONTH: August
+
+ OUTPUT:
+ GeoTIFF
+ Resolution: 20 meters
+ CRS: EPSG:32639
+ Data Type: Float32
+
+ BANDS:
+ B11, B8, B4, B3, B2, B12, SCL
+************************************************************/
+
+
+// ==========================================================
+// 1. STUDY AREA
+// ==========================================================
+
+var roi = ee.FeatureCollection(
+  'projects/amir-gee/assets/Export_Output222'
+);
+
+var geometry = roi.geometry();
+
+Map.centerObject(roi, 11);
+
+Map.addLayer(
+  roi,
+  {color: 'red'},
+  'Tehran District 22'
+);
+
+
+// ==========================================================
+// 2. GENERAL PARAMETERS
+// ==========================================================
+
+var YEARS = [2017, 2026];
+
+var MONTH = 8;
+
+var CLOUD_THRESHOLD = 80;
+
+var SCALE = 20;
+
+var CRS = 'EPSG:32639';
+
+var DRIVE_FOLDER = 'Tehran22_Sentinel2';
+
+
+// Spectral bands
+
+var SPECTRAL_BANDS = [
+  'B11',
+  'B8',
+  'B4',
+  'B3',
+  'B2',
+  'B12'
+];
+
+
+// Final band order
+
+var OUTPUT_BANDS = [
+  'B11',
+  'B8',
+  'B4',
+  'B3',
+  'B2',
+  'B12',
+  'SCL'
+];
+
+
+// ==========================================================
+// 3. SENTINEL-2 LEVEL-2A COLLECTION
+// ==========================================================
+
+var S2 = ee.ImageCollection(
+  'COPERNICUS/S2_SR_HARMONIZED'
+);
+
+
+// ==========================================================
+// 4. CLOUD AND SHADOW MASKING
+// ==========================================================
+
+function maskClouds(image) {
+
+  var scl = image.select('SCL');
+
+  // Remove:
+  // 0 = No data
+  // 1 = Saturated / defective
+  // 2 = Dark area pixels
+  // 3 = Cloud shadow
+  // 7 = Unclassified
+  // 8 = Cloud medium probability
+  // 9 = Cloud high probability
+  // 10 = Cirrus
+  // 11 = Snow / ice
+
+  var clearMask = scl.eq(4)
+    .or(scl.eq(5))
+    .or(scl.eq(6));
+
+  // Apply mask to spectral bands
+
+  var spectral = image
+    .select(SPECTRAL_BANDS)
+    .updateMask(clearMask);
+
+  return spectral.copyProperties(
+    image,
+    ['system:time_start']
+  );
+}
+
+
+// ==========================================================
+// 5. PROCESS EACH YEAR
+// ==========================================================
+
+function processYear(year) {
+
+  var startDate = ee.Date.fromYMD(
+    year, MONTH, 1
+  );
+
+  var endDate = startDate.advance(1, 'month');
+
+
+  // Filter collection by date and study area
+
+  var collection = S2
+    .filterBounds(geometry)
+    .filterDate(startDate, endDate)
+    .filter(
+      ee.Filter.lt(
+        'CLOUDY_PIXEL_PERCENTAGE',
+        CLOUD_THRESHOLD
+      )
+    );
+
+
+  print(
+    'Image count - ' + year,
+    collection.size()
+  );
+
+
+  // Cloud and shadow masking
+
+  var clearCollection = collection.map(maskClouds);
+
+
+  // ========================================================
+  // 6. MONTHLY MEDIAN COMPOSITE
+  // ========================================================
+
+  // Median of spectral bands
+
+  var spectralComposite = clearCollection
+    .median()
+    .divide(10000)
+    .toFloat();
+
+
+  // ========================================================
+  // 7. SCL COMPOSITE
+  // ========================================================
+
+  // Mode is used because SCL is categorical data
+
+  var sclComposite = collection
+    .select('SCL')
+    .reduce(ee.Reducer.mode())
+    .rename('SCL')
+    .toFloat();
+
+
+  // ========================================================
+  // 8. COMBINE ALL BANDS
+  // ========================================================
+
+  var finalImage = spectralComposite
+    .addBands(sclComposite)
+    .select(OUTPUT_BANDS)
+    .clip(geometry)
+    .toFloat();
+
+
+  // Set common output projection and resolution
+
+  finalImage = finalImage.setDefaultProjection({
+    crs: CRS,
+    scale: SCALE
+  });
+
+
+  // ========================================================
+  // 9. RGB VISUALIZATION
+  // ========================================================
+
+  Map.addLayer(
+    finalImage,
+    {
+      bands: ['B4', 'B3', 'B2'],
+      min: 0.02,
+      max: 0.30,
+      gamma: 1.2
+    },
+    'RGB Composite ' + year
+  );
+
+
+  // ========================================================
+  // 10. FALSE COLOR VISUALIZATION
+  // ========================================================
+
+  Map.addLayer(
+    finalImage,
+    {
+      bands: ['B12', 'B8', 'B4'],
+      min: 0.02,
+      max: 0.35,
+      gamma: 1.2
+    },
+    'SWIR Composite ' + year,
+    false
+  );
+
+
+  // ========================================================
+  // 11. EXPORT TO GOOGLE DRIVE
+  // ========================================================
+
+  Export.image.toDrive({
+
+    image: finalImage,
+
+    description:
+      'Tehran22_Sentinel2_L2A_' + year + '_August',
+
+    folder: DRIVE_FOLDER,
+
+    fileNamePrefix:
+      'Tehran22_S2_L2A_' + year + '_August',
+
+    region: geometry,
+
+    scale: SCALE,
+
+    crs: CRS,
+
+    maxPixels: 1e13,
+
+    fileFormat: 'GeoTIFF',
+
+    formatOptions: {
+      cloudOptimized: true
+    }
+
+  });
+
+
+  return finalImage;
+
+}
+
+
+// ==========================================================
+// 12. GENERATE 2017 AND 2026 IMAGES
+// ==========================================================
+
+var image2017 = processYear(2017);
+
+var image2026 = processYear(2026);
+
+
+// ==========================================================
+// 13. FINAL INFORMATION
+// ==========================================================
+
+print('2017 Final Image:', image2017);
+
+print('2026 Final Image:', image2026);
+
+print('Output bands:', OUTPUT_BANDS);
+
+print('Study Area:', roi);
+
+print('Processing completed. Check Tasks tab.');
+
